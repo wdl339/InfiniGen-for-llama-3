@@ -17,6 +17,9 @@ def weight_bias_concat(weight, bias, scaling=False, head_dim=1.0):
     Returns:
         concatenated weight and bias (D, D+1)
     """
+    
+    if bias is None:
+        bias = torch.zeros(weight.shape[0], dtype=weight.dtype).to(weight.device)
 
     if scaling:
         return torch.cat((weight, bias.unsqueeze(1).to(weight.device)), dim=1) * (

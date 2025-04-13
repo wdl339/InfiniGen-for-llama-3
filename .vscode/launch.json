@@ -8,9 +8,25 @@
             "name": "Python Debugger: Current File with Arguments",
             "type": "debugpy",
             "request": "launch",
-            "program": "/home/wdl/infinigen/accuracy/lm_eval/server.py",
+            "python": "/home/wdl/miniconda3/envs/infinigen/bin/python",
+            "program": "/mnt/wdl/infinigen/speedup/flexgen/flexgen/flex_llama3.py",
+            "args": [
+                "--model", "/mnt/wdl/llama-model/llama-3.2-3b-instruct",
+                "--path", "/mnt/wdl/llama_weights", 
+                "--percent", "100", "0", "0", "100", "100", "0", 
+                "--overlap", "false", 
+                "--gpu-batch-size", "2", 
+                "--num-gpu-batches", "1", 
+                "--prompt-len", "384", 
+                "--gen-len", "128", 
+                "--warmup-input-path", "flexgen/pg19_firstbook.txt", 
+                "--test-input-path", "flexgen/pg19_firstbook.txt", 
+                "--alpha", "4", 
+                "--partial-weight-ratio", "0.2", 
+                "--max-num-kv", "102"
+            ],
             "console": "integratedTerminal",
-            "cwd": "${workspaceFolder}/accuracy/lm_eval"
+            "cwd": "${workspaceFolder}/speedup",
         }
     ]
 }

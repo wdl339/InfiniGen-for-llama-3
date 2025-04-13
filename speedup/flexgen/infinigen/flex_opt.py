@@ -1390,6 +1390,14 @@ def run_flexgen(args):
     _, cpu_peak_mem = cpu.mem_stats()
 
     projected = bool(args.debug_mode or cut_gen_len)
+    
+    outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)
+    show_str = "Outputs:\n" + 70 * '-' + "\n"
+    # for i in [0, len(outputs)-1]:
+    show_str += f"{0}: {outputs[0]}\n"
+    show_str += "-" * 70 + "\n"
+    if args.verbose >= 2:
+        print(show_str)
 
     print("+++++++++++++++++++++++++++++++++++++++++++++++++")
     print("InfiniGen (Ours)")
