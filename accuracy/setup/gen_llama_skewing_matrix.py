@@ -57,9 +57,11 @@ def main():
         query = query_v[name]
         key = key_v[name]
 
+        # print(n_head, key.shape) # 32, torch.Size([1, 8, 2048, 128])
+
         for head in range(n_head):
             in_q = query[0, head]
-            in_k = key[0, head]
+            in_k = key[0, int(head / 4)]
             uq, sq, vq = torch.svd(in_q.to(torch.float))
             uk, sk, vk = torch.svd(in_k.to(torch.float))
             s = sq * sk

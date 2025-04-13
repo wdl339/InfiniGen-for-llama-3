@@ -156,6 +156,16 @@ class LlamaMLP(nn.Module):
     def forward(self, x):
         return self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
 
+def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
+    """
+    This is the equivalent of torch.repeat_interleave(x, dim=1, repeats=n_rep). The hidden states go from (batch,
+    num_key_value_heads, seqlen, head_dim) to (batch, num_attention_heads, seqlen, head_dim)
+    """
+    batch, num_key_value_heads, slen, head_dim = hidden_states.shape
+    if n_rep == 1:
+        return hidden_states
+    hidden_states = hidden_states[:, :, None, :, :].expand(batch, num_key_value_heads, n_rep, slen, head_dim)
+    return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
 
 class LlamaAttention(nn.Module):
     """Multi-headed attention from 'Attention Is All You Need' paper"""
@@ -165,6 +175,8 @@ class LlamaAttention(nn.Module):
         self.config = config
         self.hidden_size = config.hidden_size
         self.num_heads = config.num_attention_heads
+        self.num_key_value_heads = config.num_key_value_heads
+        self.num_key_value_groups = self.num_heads // self.num_key_value_heads
         self.head_dim = self.hidden_size // self.num_heads
         self.max_position_embeddings = config.max_position_embeddings
 
@@ -174,8 +186,8 @@ class LlamaAttention(nn.Module):
                 f" and `num_heads`: {self.num_heads})."
             )
         self.q_proj = nn.Linear(self.hidden_size, self.num_heads * self.head_dim, bias=False)
-        self.k_proj = nn.Linear(self.hidden_size, self.num_heads * self.head_dim, bias=False)
-        self.v_proj = nn.Linear(self.hidden_size, self.num_heads * self.head_dim, bias=False)
+        self.k_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=False)
+        self.v_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=False)
         self.o_proj = nn.Linear(self.num_heads * self.head_dim, self.hidden_size, bias=False)
         self.rotary_emb = LlamaRotaryEmbedding(self.head_dim, max_position_embeddings=self.max_position_embeddings)
         self.attn = None
@@ -213,6 +225,7 @@ class LlamaAttention(nn.Module):
         attn_mask = torch.full(attn.shape, -10000, dtype=attn.dtype, device=attn.device)
         attn_mask = torch.triu(attn_mask, diagonal = 1)
         fetch_mask = torch.zeros_like(attn)
+        fake_mask  = torch.zeros(attn.shape[0], tgt_len, src_len, device= attn.device)
         m_inf = torch.tensor([[-10000]], dtype=attn.dtype, device=attn.device)
         attn = attn + attn_mask
         del attn_mask
@@ -228,45 +241,77 @@ class LlamaAttention(nn.Module):
 
         store_max = int(src_len * self.capacity)
 
-        fetch_mask[:, :fetch_max] = torch.tril(torch.ones((fetch_max, src_len), dtype = attn.dtype, device = attn.device)).unsqueeze(0)
+        if (tgt_len == 1):
+            a = torch.ones(src_len, dtype = attn.dtype, device = attn.device)
+        else:
+            a = torch.tril(torch.ones((fetch_max, src_len), dtype = attn.dtype, device = attn.device)).unsqueeze(0)
+        fake_mask[:, :fetch_max] = a
+        # fetch_mask[:, :fetch_max] = a
 
-        for i in range(fetch_max, store_max):
-            _, ind = torch.topk(attn[:,i, :i+1], k = fetch_num[i], dim = -1)
-            fetch_mask[:, i, :i+1] = fetch_mask[:, i, :i + 1].scatter(-1, ind, 1)
+        if tgt_len == 1:
+            _, ind = torch.topk(attn[:, 0, :src_len], k = fetch_num[0], dim = -1)
+            fake_mask[:, 0, :src_len] = fake_mask[:, 0, :src_len].scatter(-1, ind, 1)
 
-        for i in range(store_max, tgt_len):
-            _, ind = torch.topk(attn[:,i, :i+1], k = fetch_num[i], dim = -1)
-            fetch_mask[:, i, :i + 1] = fetch_mask[:, i, :i + 1].scatter(-1, ind, 1)
+            # if self.eviction_policy == "fifo":
+            #     evict_idx = src_len - 1 - store_max
+            #     attn[:, 0:, evict_idx] = -10000
 
-            if i == (tgt_len - 1):
-                continue
+            # elif self.eviction_policy == "lru":
+            #     idx = torch.arange(src_len, device = attn.device).unsqueeze(0).unsqueeze(-1)
+            #     idx = idx * fetch_mask[:, 0, :int((src_len - 1) / 2)] # avoid evicting recently added ones
+            #     # Most recently fetched idx per each KV cache
+            #     _, idx = torch.max(idx, dim = 1, keepdim = True) # heads, 1, i/2
+            #     _, ind = torch.min(idx, dim = -1, keepdim = True) # heads, 1, 1
+            #     ind = ind.repeat(1, tgt_len - (i + 1), 1)
+            #     attn[:, 0:] = attn[:, 0:].scatter(-1, ind, -10000)
 
-            # Before adding KV cache, evict one
-            if self.eviction_policy == "fifo":
-                evict_idx = i - store_max
-                attn[:, (i + 1):, evict_idx] = -10000
+            # elif self.eviction_policy == "counter":
+            #     counter = torch.sum(fetch_mask[:, 0, :int((src_len - 1) / 2)], dim = 1, keepdim = True) #heads, 1, i/2
+            #     _, ind = torch.min(counter, dim = -1, keepdim = True) #heads, 1, 1
+            #     ind = ind.repeat(1, tgt_len - (i + 1),1)
+            #     attn[:, 0:] = attn[:, 0:].scatter(-1, ind, -10000)
 
-            elif self.eviction_policy == "lru":
-                idx = torch.arange(i + 1, device = attn.device).unsqueeze(0).unsqueeze(-1)
-                idx = idx * fetch_mask[:, :i + 1, :int(i / 2)] # avoid evicting recently added ones
-                # Most recently fetched idx per each KV cache
-                _, idx = torch.max(idx, dim = 1, keepdim = True) # heads, 1, i/2
-                _, ind = torch.min(idx, dim = -1, keepdim = True) # heads, 1, 1
-                ind = ind.repeat(1, tgt_len - (i + 1), 1)
-                attn[:, (i + 1):] = attn[:, (i + 1):].scatter(-1, ind, -10000)
+            # else:
+            #     raise NotImplementedError
+        else:   
+            for i in range(fetch_max, store_max):
+                _, ind = torch.topk(attn[:, i, :i+1], k = fetch_num[i], dim = -1)
+                fake_mask[:, i, :i+1] = fake_mask[:, i, :i + 1].scatter(-1, ind, 1)
 
-            elif self.eviction_policy == "counter":
-                counter = torch.sum(fetch_mask[:, :i + 1, :int(i / 2)], dim = 1, keepdim = True) #heads, 1, i/2
-                _, ind = torch.min(counter, dim = -1, keepdim = True) #heads, 1, 1
-                ind = ind.repeat(1,tgt_len-(i+1),1)
-                attn[:, (i + 1):] = attn[:, (i + 1):].scatter(-1, ind, -10000)
+            for i in range(store_max, tgt_len):
+                _, ind = torch.topk(attn[:,i, :i+1], k = fetch_num[i], dim = -1)
+                fake_mask[:, i, :i + 1] = fake_mask[:, i, :i + 1].scatter(-1, ind, 1)
 
-            else:
-                raise NotImplementedError
+                if i == (tgt_len - 1):
+                    continue
 
-        density = fetch_mask.float().sum().item() / heads / (tgt_len * (tgt_len + 1) / 2)
-        fetch_mask = torch.where(fetch_mask == 1, 0, m_inf)
-        fetch_mask = fetch_mask.view(b, h, tgt_len, src_len)
+                # Before adding KV cache, evict one
+                if self.eviction_policy == "fifo":
+                    evict_idx = i - store_max
+                    attn[:, (i + 1):, evict_idx] = -10000
+
+                elif self.eviction_policy == "lru":
+                    idx = torch.arange(i + 1, device = attn.device).unsqueeze(0).unsqueeze(-1)
+                    idx = idx * fetch_mask[:, :i + 1, :int(i / 2)] # avoid evicting recently added ones
+                    # Most recently fetched idx per each KV cache
+                    _, idx = torch.max(idx, dim = 1, keepdim = True) # heads, 1, i/2
+                    _, ind = torch.min(idx, dim = -1, keepdim = True) # heads, 1, 1
+                    ind = ind.repeat(1, tgt_len - (i + 1), 1)
+                    attn[:, (i + 1):] = attn[:, (i + 1):].scatter(-1, ind, -10000)
+
+                elif self.eviction_policy == "counter":
+                    counter = torch.sum(fetch_mask[:, :i + 1, :int(i / 2)], dim = 1, keepdim = True) #heads, 1, i/2
+                    _, ind = torch.min(counter, dim = -1, keepdim = True) #heads, 1, 1
+                    ind = ind.repeat(1,tgt_len-(i+1),1)
+                    attn[:, (i + 1):] = attn[:, (i + 1):].scatter(-1, ind, -10000)
+
+                else:
+                    raise NotImplementedError
+
+        density = fake_mask.float().sum().item() / heads / (tgt_len * (tgt_len + 1) / 2)
+        fake_mask = torch.where(fake_mask == 1, 0, m_inf)
+        fake_mask = fake_mask.view(b, h, tgt_len, src_len)
+        fetch_mask = fake_mask[:, :, -tgt_len:, :]
         return fetch_mask, density
     
     def forward(
@@ -285,8 +330,8 @@ class LlamaAttention(nn.Module):
         ### Ours  ###########################################
         query_states = self.q_proj(hidden_states).view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
         
-        key_states = self.k_proj(hidden_states).view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
-        value_states = self.v_proj(hidden_states).view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
+        key_states = self.k_proj(hidden_states).view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
+        value_states = self.v_proj(hidden_states).view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
 
         kv_seq_len = key_states.shape[-2]
         if past_key_value is not None:
@@ -301,6 +346,9 @@ class LlamaAttention(nn.Module):
             value_states = torch.cat([past_key_value[1], value_states], dim=2)
 
         past_key_value = (key_states, value_states) if use_cache else None
+
+        key_states = repeat_kv(key_states, self.num_key_value_groups)
+        value_states = repeat_kv(value_states, self.num_key_value_groups)
         
         ### Speculate attention ###
         if (self.previous_hidden_states is not None) and (self.partial_weight_q is not None):
