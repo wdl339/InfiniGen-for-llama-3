@@ -21,9 +21,9 @@
                 "--gen-len", "128", 
                 "--warmup-input-path", "flexgen/pg19_firstbook.txt", 
                 "--test-input-path", "flexgen/pg19_firstbook.txt", 
-                "--alpha", "4", 
-                "--partial-weight-ratio", "0.2", 
-                "--max-num-kv", "102"
+                "--alpha", "0", 
+                "--partial-weight-ratio", "1", 
+                "--max-num-kv", "1000"
             ],
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}/speedup",

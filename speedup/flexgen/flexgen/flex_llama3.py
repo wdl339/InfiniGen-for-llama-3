@@ -113,6 +113,15 @@ class LlamaOutputEmbed(OutputEmbed):
             self.task.do_sample, self.task.temperature)
         hidden.val = h
 
+def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
+    """
+    The hidden states go from (num_key_value_heads, head_dim) to (num_attention_heads, head_dim)
+    """
+    num_key_value_heads, head_dim = hidden_states.shape
+    if n_rep == 1:
+        return hidden_states
+    hidden_states = hidden_states[ :, None, :].expand(num_key_value_heads, n_rep, head_dim)
+    return hidden_states.reshape(num_key_value_heads * n_rep, head_dim)
 
 class LlamaSelfAttention(SelfAttention):
     def __init__(self, config, env, policy, layer_id, enable_prefetching, 
@@ -143,8 +152,12 @@ class LlamaSelfAttention(SelfAttention):
         weights[1].data = weight_bias_concat(weights[1].data, None, True, head_dim)
         weights[1].shape = (h, h+1)
         # WK
+        weights[2].data = repeat_kv(weights[2].data, n_head // n_kv_head)
         weights[2].data = weight_bias_concat(weights[2].data, None)
-        weights[2].shape = (n_kv_head*head_dim, h+1)       
+        weights[2].shape = (h, h+1)    
+        # WV
+        weights[3].data = repeat_kv(weights[3].data, n_head // n_kv_head)
+        weights[3].shape = (h, h)    
         
         weight_home.store(weights)
 
