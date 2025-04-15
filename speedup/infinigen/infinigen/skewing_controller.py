@@ -86,8 +86,8 @@ def skew(query, key, wq, wk, n_head, head_dim):
         wk[start:end, :] = A.t() @ wk[start:end]
     return wq, wk
 
-def skew_mqa(query, key, wq, wk, n_head, n_kv_head, head_dim):
-    """Manipulates the query/key weight matrix for skewing in MQA architecture.
+def skew_gqa(query, key, wq, wk, n_head, n_kv_head, head_dim):
+    """Manipulates the query/key weight matrix for skewing in gqa architecture.
 
     Args:
         query: Query matrix (b, n, h, d)
@@ -108,6 +108,7 @@ def skew_mqa(query, key, wq, wk, n_head, n_kv_head, head_dim):
         q_end = (h_idx + 1) * head_dim
         
         k_head_idx = h_idx % n_kv_head
+        # k_head_idx = h_idx // (n_head // n_kv_head)
         k_start = k_head_idx * head_dim
         k_end = (k_head_idx + 1) * head_dim
         
@@ -125,5 +126,7 @@ def skew_mqa(query, key, wq, wk, n_head, n_kv_head, head_dim):
         
         wq[:, q_start:q_end] = wq[:, q_start:q_end] @ A
         wk[k_start:k_end, :] = A.t() @ wk[k_start:k_end, :]
+        # if h_idx % (n_head // n_kv_head) == 0:
+        #     wk[k_start:k_end, :] = A.t() @ wk[k_start:k_end, :]
         
     return wq, wk

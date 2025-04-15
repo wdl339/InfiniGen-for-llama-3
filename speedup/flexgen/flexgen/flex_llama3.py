@@ -191,7 +191,7 @@ class LlamaSelfAttention(SelfAttention):
                 prev_partial_cache_read_buf.store(set_partial_cache(new_k_cache.data, self.partial_index, n_head, head_dim))
                 prev_partial_weight_read_buf.store(set_partial_weight(w_q.data, self.partial_index, n_head, head_dim))
             if warmup:
-                weight_home.val[0] = w_q.smart_copy(weight_home.val[0].device)[0]
+                weight_home.val[1] = w_q.smart_copy(weight_home.val[1].device)[0]
                 weight_home.val[2] = w_k.smart_copy(weight_home.val[2].device)[0]
         else:  # decoding
             mask, donate[1] = attention_mask.val.smart_copy(self.attention_compute)
@@ -394,7 +394,7 @@ def run_flexgen(args):
     try:
         output_ids = model.generate(
             warmup_inputs, max_new_tokens=1, verbose=args.verbose
-            # , warmup=True
+            , warmup=True
             )
 
         timers("generate").reset()

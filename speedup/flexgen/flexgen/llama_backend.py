@@ -20,7 +20,7 @@ from flexgen.utils import (GB, T, cpu_mem_stats, vector_gather,
     np_dtype_to_torch_dtype, torch_dtype_to_np_dtype,
     torch_dtype_to_num_bytes)
 
-from infinigen.skewing_controller import reform_hidden_states, skew, skew_mqa
+from infinigen.skewing_controller import reform_hidden_states, skew, skew_gqa
 from infinigen.partial_weight_generation_controller import partial_weight_index_generation
 from infinigen.kv_selection_controller import speculate_attention
 
@@ -196,8 +196,8 @@ class Llama3TorchDevice(TorchDevice):
         v = v.view(b, s, n_kv_head, head_dim)
         
         # Generate skewing matrix
-        if warmup:
-            w_q.data, w_k.data = skew(q, k, w_q.data, w_k.data, n_head, head_dim)
+        # if warmup:
+        #     w_q.data, w_k.data = skew(q, k, w_q.data, w_k.data, n_head, head_dim)
 
         cos, sin = self.llama3_rotary_embedding(v, position_ids)
         q, k = llama3_apply_rotary_pos_emb(q, k, cos, sin)
@@ -307,8 +307,9 @@ class Llama3TorchDevice(TorchDevice):
         v = v.view(b, s, n_kv_head, head_dim)
         
         # Generate skewing matrix
-        if warmup:
-            w_q.data, w_k.data = skew_mqa(q, k, w_q.data, w_k.data, n_head, n_kv_head, head_dim)
+        # if warmup:
+        #     w_q.data, w_k.data = skew_gqa(q, k, w_q.data, w_k.data, n_head, n_kv_head, head_dim)
+            # w_q.data, w_k.data = skew(q, k, w_q.data, w_k.data, n_head, head_dim)
 
         cos, sin = self.llama3_rotary_embedding(v, position_ids)
         q, k = llama3_apply_rotary_pos_emb(q, k, cos, sin)
