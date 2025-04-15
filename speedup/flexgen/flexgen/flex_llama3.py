@@ -138,14 +138,7 @@ class LlamaSelfAttention(SelfAttention):
             ((n_head*head_dim, h), dtype, path + "self_attn.o_proj.weight"),
         ]
         weights = init_weight_list(weight_specs, self.policy, self.env) 
-        
-        # WQ
-        weights[1].data = weight_bias_concat(weights[1].data, None, True, head_dim)
-        weights[1].shape = (h, h+1)
-        # WK
-        weights[2].data = weight_bias_concat(weights[2].data, None)
-        weights[2].shape = (n_kv_head*head_dim, h+1)       
-        
+
         weight_home.store(weights)
 
     def load_weight(self, weight_home, weight_read_buf, k):
@@ -400,7 +393,9 @@ def run_flexgen(args):
     
     try:
         output_ids = model.generate(
-            warmup_inputs, max_new_tokens=1, verbose=args.verbose)
+            warmup_inputs, max_new_tokens=1, verbose=args.verbose
+            # , warmup=True
+            )
 
         timers("generate").reset()
         output_ids = model.generate(

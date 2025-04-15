@@ -20,7 +20,7 @@ from flexgen.utils import (GB, T, cpu_mem_stats, vector_gather,
     np_dtype_to_torch_dtype, torch_dtype_to_np_dtype,
     torch_dtype_to_num_bytes)
 
-from infinigen.skewing_controller import reform_hidden_states, skew
+from infinigen.skewing_controller import reform_hidden_states, skew, skew_mqa
 from infinigen.partial_weight_generation_controller import partial_weight_index_generation
 from infinigen.kv_selection_controller import speculate_attention
 
@@ -291,11 +291,10 @@ class Llama3TorchDevice(TorchDevice):
         scaling = head_dim ** -0.5
 
         hidden = rms_norm(inputs.data, weight=w_ln.data, eps=eps)
-        new_h = reform_hidden_states(hidden)
 
         # shape: (b, s, h)
-        q = F.linear(new_h, w_q.data) * scaling
-        k = F.linear(new_h, w_k.data)
+        q = F.linear(hidden, w_q.data) * scaling
+        k = F.linear(hidden, w_k.data)
         v = F.linear(hidden, w_v.data)
         
         # Partial weight index generation
@@ -309,7 +308,7 @@ class Llama3TorchDevice(TorchDevice):
         
         # Generate skewing matrix
         if warmup:
-            w_q.data, w_k.data = skew(q, k, w_q.data, w_k.data, n_head, head_dim)
+            w_q.data, w_k.data = skew_mqa(q, k, w_q.data, w_k.data, n_head, n_kv_head, head_dim)
 
         cos, sin = self.llama3_rotary_embedding(v, position_ids)
         q, k = llama3_apply_rotary_pos_emb(q, k, cos, sin)
@@ -380,16 +379,15 @@ class Llama3TorchDevice(TorchDevice):
         scaling = head_dim ** -0.5
 
         hidden = rms_norm(inputs.data, weight=w_ln.data, eps=eps)
-        new_h = reform_hidden_states(hidden)
         # Speculate attention
         prefetch_idx = None
         if p_w_q is not None:
             with torch.cuda.stream(speculation_stream):
-                prefetch_idx = speculate_attention(new_h, p_w_q, partial_k_cache, n_head, alpha, max_num_kv)
+                prefetch_idx = speculate_attention(hidden, p_w_q, partial_k_cache, n_head, alpha, max_num_kv)
 
         # shape: (b, 1, h)
-        q = F.linear(new_h, w_q.data) * scaling
-        k = F.linear(new_h, w_k.data)
+        q = F.linear(hidden, w_q.data) * scaling
+        k = F.linear(hidden, w_k.data)
         v = F.linear(hidden, w_v.data)
         # shape: (b, 1, n_head, head_dim)
         q = q.view(b, tgt_s, n_head, head_dim)
