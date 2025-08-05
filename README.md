@@ -1,5 +1,7 @@
 在原项目基础上做了修改使其能支持 llama3.1 与 3.2 模型，并提供了 server 接口。原项目：InfiniGen: Efficient Generative Inference of Large Language Models with Dynamic KV Cache Management (OSDI'24)仅支持OPT与llama2
 
+Based on the original project, modifications were made to enable support for llama3.1 and 3.2 models, and a server interface was provided. The original project only supported OPT and llama2.
+
 # InfiniGen: Efficient Generative Inference of Large Language Models with Dynamic KV Cache Management
 [[paper](https://arxiv.org/abs/2406.19707)]
 
